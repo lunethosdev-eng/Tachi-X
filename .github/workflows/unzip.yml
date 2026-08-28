@@ -19,35 +19,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Descomprimir si existe algún archivo .zip
-      - name: Descomprimir ZIP y organizar a la raíz
+      # 2. Descomprimir y aplanar la estructura de carpetas a la raíz
+      - name: Descomprimir y aplanar a la raíz
         run: |
+          # Descomprimir cualquier archivo .zip en la raíz
           for file in *.zip; do
             if [ -f "$file" ]; then
               echo "Descomprimiendo $file..."
-              mkdir -p temp_extracted
               unzip -o "$file" -d temp_extracted
               rm "$file"
-
-              INNER_DIR=$(find temp_extracted -mindepth 1 -maxdepth 1 -type d)
-              if [ $(echo "$INNER_DIR" | wc -l) -eq 1 ]; then
-                cp -rn $INNER_DIR/* . 2>/dev/null || true
-                cp -rn $INNER_DIR/.* . 2>/dev/null || true
-              else
-                cp -rn temp_extracted/* . 2>/dev/null || true
-                cp -rn temp_extracted/.* . 2>/dev/null || true
-              fi
-              rm -rf temp_extracted
             fi
           done
 
-      # 3. Guardar en el repo la estructura descomprimida
-      - name: Guardar archivos extraídos en el repositorio
+          # Si se extrajo algo en temp_extracted
+          if [ -d "temp_extracted" ]; then
+            # Buscar dónde quedó ubicado el package.json
+            PKG_PATH=$(find temp_extracted -name "package.json" | head -n 1)
+
+            if [ -n "$PKG_PATH" ]; then
+              # Obtener la carpeta que contiene el package.json
+              PROJECT_DIR=$(dirname "$PKG_PATH")
+              echo "Proyecto encontrado en: $PROJECT_DIR"
+
+              # Mover todo el contenido de esa carpeta a la raíz
+              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
+              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
+            fi
+
+            rm -rf temp_extracted
+          fi
+
+      # 3. Commit de la estructura corregida en el repo
+      - name: Guardar cambios en el repositorio
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "auto: desempaquetar estructura del proyecto" || exit 0
+          git commit -m "auto: mover proyecto a la raiz" || exit 0
           git push || true
 
       # 4. Node.js
@@ -56,7 +64,7 @@ jobs:
         with:
           node-version: '20'
 
-      # 5. Instalar dependencias
+      # 5. Instalar dependencias (Ahora package.json ya estará en la raíz)
       - name: Install dependencies
         run: npm install
 
@@ -123,7 +131,7 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
-      # 11. Subir el APK final como Artifact
+      # 11. Subir Artifact
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
