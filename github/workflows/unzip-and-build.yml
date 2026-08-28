@@ -1,0 +1,136 @@
+name: Build Android APK (con Auto-Descompresión)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del repositorio
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Descomprimir el ZIP y aplanar todo a la raíz
+      - name: Extraer y reorganizar archivos
+        run: |
+          for file in *.zip; do
+            if [ -f "$file" ]; then
+              echo "Descomprimiendo $file..."
+              unzip -o "$file" -d temp_extracted
+              rm "$file"
+            fi
+          done
+
+          # Si se extrajo una subcarpeta, mueve package.json y todo lo demás a la raíz
+          if [ -d "temp_extracted" ]; then
+            PKG_PATH=$(find temp_extracted -name "package.json" | head -n 1)
+            if [ -n "$PKG_PATH" ]; then
+              PROJECT_DIR=$(dirname "$PKG_PATH")
+              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
+              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
+            fi
+            rm -rf temp_extracted
+          fi
+
+          # Respuesto: Si los archivos quedaron guardados en subcarpeta anteriormente
+          if [ ! -f "package.json" ]; then
+            PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+            if [ -n "$PKG_PATH" ]; then
+              PROJECT_DIR=$(dirname "$PKG_PATH")
+              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
+              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
+            fi
+          fi
+
+      # 3. Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 4. Instalar dependencias
+      - name: Install dependencies
+        run: npm install
+
+      # 5. Build web assets
+      - name: Build web assets
+        run: npm run build
+
+      # 6. Java 21
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # 7. Instalación global de Gradle para compilar sin el wrapper.jar
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 8. Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      # 8.5. Licencias SDK
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # 9. Capacitor Android & Plugin
+      - name: Add Capacitor Android platform
+        shell: bash
+        run: |
+          set -e
+
+          npx cap add android || true
+
+          mkdir -p android/app/src/main/java/com/taichix/app/plugins
+
+          if [ -f "android-plugin/src/main/java/com/taichix/app/plugins/ServerNativePlugin.java" ]; then
+            cp \
+              android-plugin/src/main/java/com/taichix/app/plugins/ServerNativePlugin.java \
+              android/app/src/main/java/com/taichix/app/plugins/
+            echo "✅ ServerNativePlugin.java copiado exitosamente"
+          else
+            echo "❌ ERROR: ServerNativePlugin.java no encontrado"
+            exit 1
+          fi
+
+          mkdir -p android/app/src/main/assets
+          cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
+          [
+            {
+              "pkg": "@capacitor/core",
+              "classpath": "com.getcapacitor.Bridge"
+            },
+            {
+              "pkg": "com.taichix.app",
+              "classpath": "com.taichix.app.plugins.ServerNativePlugin"
+            }
+          ]
+          EOF
+
+          npx cap sync android
+
+      # 10. Compilar APK usando Gradle global
+      - name: Build debug APK
+        working-directory: android
+        shell: bash
+        run: |
+          gradle assembleDebug --stacktrace
+
+      # 11. Subir APK a la sección de Artifacts
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taichix-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
