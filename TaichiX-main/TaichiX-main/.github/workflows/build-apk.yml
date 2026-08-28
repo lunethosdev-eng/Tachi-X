@@ -41,16 +41,20 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # 6. Android SDK
+      # 6. Setup Gradle oficial (garantiza el entorno de Gradle listo)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 7. Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      # 6.5. Licencias Android SDK
+      # 7.5. Licencias Android SDK
       - name: Accept Android SDK Licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      # 7. Capacitor Android
+      # 8. Capacitor Android
       - name: Add Capacitor Android platform
         shell: bash
         run: |
@@ -91,21 +95,21 @@ jobs:
 
           npx cap sync android
 
-      # 7.5. Regenerar Gradle Wrapper
-      - name: Regenerar Gradle Wrapper
+      # 9. Reparar Wrapper si falta el JAR antes de compilar
+      - name: Repair Gradle Wrapper JAR
         working-directory: TaichiX-main/TaichiX-main/android
         run: |
-          gradle wrapper
+          mkdir -p gradle/wrapper
+          gradle wrapper --gradle-version 8.2
 
-      # 8. Build APK
+      # 10. Build APK (Usa Gradle directo en lugar del script gradlew si falla)
       - name: Build debug APK
         working-directory: TaichiX-main/TaichiX-main/android
         shell: bash
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace
 
-      # 9. Subir APK
+      # 11. Subir APK
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
