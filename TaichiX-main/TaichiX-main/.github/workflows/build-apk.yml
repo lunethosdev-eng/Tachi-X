@@ -7,6 +7,11 @@ on:
       - master
   workflow_dispatch:
 
+# Indicar que todo se ejecute donde quedó guardado el package.json
+defaults:
+  run:
+    working-directory: TaichiX-main/TaichiX-main
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,7 +46,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      # 6.5. Aceptar licencias de Android SDK
+      # 6.5. Licencias Android SDK
       - name: Accept Android SDK Licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
@@ -68,7 +73,7 @@ jobs:
             exit 1
           fi
 
-          # Crear capacitor.plugins.json para registrar el plugin
+          # Crear capacitor.plugins.json
           mkdir -p android/app/src/main/assets
           cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
           [
@@ -89,7 +94,7 @@ jobs:
 
       # 8. Build APK
       - name: Build debug APK
-        working-directory: android
+        working-directory: TaichiX-main/TaichiX-main/android
         shell: bash
         run: |
           chmod +x gradlew
@@ -100,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: taichix-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: TaichiX-main/TaichiX-main/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
 
