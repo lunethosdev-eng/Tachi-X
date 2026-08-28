@@ -7,10 +7,6 @@ on:
       - master
   workflow_dispatch:
 
-defaults:
-  run:
-    working-directory: TaichiX-main/TaichiX-main
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,49 +16,78 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Node.js
+      # 2. Descomprimir ZIP si existe y aplanar carpeta a la raíz
+      - name: Extraer ZIP y organizar raíz
+        run: |
+          for file in *.zip; do
+            if [ -f "$file" ]; then
+              echo "Extrayendo $file..."
+              unzip -o "$file" -d temp_extracted
+              rm "$file"
+            fi
+          done
+
+          if [ -d "temp_extracted" ]; then
+            PKG_PATH=$(find temp_extracted -name "package.json" | head -n 1)
+            if [ -n "$PKG_PATH" ]; then
+              PROJECT_DIR=$(dirname "$PKG_PATH")
+              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
+              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
+            fi
+            rm -rf temp_extracted
+          fi
+
+          # Si el proyecto ya estaba subido en subcartera
+          if [ ! -f "package.json" ]; then
+            PKG_PATH=$(find . -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+            if [ -n "$PKG_PATH" ]; then
+              PROJECT_DIR=$(dirname "$PKG_PATH")
+              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
+              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
+            fi
+          fi
+
+      # 3. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. Instalar dependencias
+      # 4. Instalar dependencias
       - name: Install dependencies
         run: npm install
 
-      # 4. Build web
+      # 5. Build web assets
       - name: Build web assets
         run: npm run build
 
-      # 5. Java 21
+      # 6. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # 6. Setup Gradle oficial (garantiza el entorno de Gradle listo)
+      # 7. Setup Gradle (Garantiza Gradle sin depender del wrapper.jar)
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      # 7. Android SDK
+      # 8. Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      # 7.5. Licencias Android SDK
+      # 8.5. Licencias SDK
       - name: Accept Android SDK Licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      # 8. Capacitor Android
+      # 9. Capacitor Android & Plugins
       - name: Add Capacitor Android platform
         shell: bash
         run: |
           set -e
 
           npx cap add android || true
-
-          echo "Preparing native plugin directory..."
 
           mkdir -p android/app/src/main/java/com/taichix/app/plugins
 
@@ -76,7 +101,6 @@ jobs:
             exit 1
           fi
 
-          # Crear capacitor.plugins.json
           mkdir -p android/app/src/main/assets
           cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
           [
@@ -91,20 +115,11 @@ jobs:
           ]
           EOF
 
-          echo "✅ capacitor.plugins.json creado correctamente"
-
           npx cap sync android
 
-      # 9. Reparar Wrapper si falta el JAR antes de compilar
-      - name: Repair Gradle Wrapper JAR
-        working-directory: TaichiX-main/TaichiX-main/android
-        run: |
-          mkdir -p gradle/wrapper
-          gradle wrapper --gradle-version 8.2
-
-      # 10. Build APK (Usa Gradle directo en lugar del script gradlew si falla)
+      # 10. Compilar APK usando el Gradle global
       - name: Build debug APK
-        working-directory: TaichiX-main/TaichiX-main/android
+        working-directory: android
         shell: bash
         run: |
           gradle assembleDebug --stacktrace
@@ -114,7 +129,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: taichix-apk
-          path: TaichiX-main/TaichiX-main/android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
 
