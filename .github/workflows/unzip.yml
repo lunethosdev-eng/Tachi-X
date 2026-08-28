@@ -1,31 +1,34 @@
-name: Descomprimir y Organizar ZIPs
+name: Build Android APK (con Auto-Unzip)
 
 on:
   push:
-    paths:
-      - '**.zip'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  unzip:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Descargar repositorio
+      # 1. Checkout del repositorio
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extraer y mover a la raíz
+      # 2. Descomprimir si existe algún archivo .zip
+      - name: Descomprimir ZIP y organizar a la raíz
         run: |
           for file in *.zip; do
             if [ -f "$file" ]; then
-              # Extraer en carpeta temporal
+              echo "Descomprimiendo $file..."
               mkdir -p temp_extracted
               unzip -o "$file" -d temp_extracted
               rm "$file"
 
-              # Mover todo el contenido a la raíz (manejando carpetas anidadas)
-              # Si hay una sola carpeta contenedora dentro del zip, mueve su interior
               INNER_DIR=$(find temp_extracted -mindepth 1 -maxdepth 1 -type d)
               if [ $(echo "$INNER_DIR" | wc -l) -eq 1 ]; then
                 cp -rn $INNER_DIR/* . 2>/dev/null || true
@@ -34,15 +37,97 @@ jobs:
                 cp -rn temp_extracted/* . 2>/dev/null || true
                 cp -rn temp_extracted/.* . 2>/dev/null || true
               fi
-              
               rm -rf temp_extracted
             fi
           done
 
-      - name: Guardar cambios
+      # 3. Guardar en el repo la estructura descomprimida
+      - name: Guardar archivos extraídos en el repositorio
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "auto: extraer contenido a la raiz" || exit 0
-          git push
+          git commit -m "auto: desempaquetar estructura del proyecto" || exit 0
+          git push || true
+
+      # 4. Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 5. Instalar dependencias
+      - name: Install dependencies
+        run: npm install
+
+      # 6. Build web assets
+      - name: Build web assets
+        run: npm run build
+
+      # 7. Java 21
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # 8. Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 8.5. Licencias SDK
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # 9. Capacitor Android & Plugin Setup
+      - name: Add Capacitor Android platform
+        shell: bash
+        run: |
+          set -e
+          npx cap add android || true
+
+          mkdir -p android/app/src/main/java/com/taichix/app/plugins
+
+          if [ -f "android-plugin/src/main/java/com/taichix/app/plugins/ServerNativePlugin.java" ]; then
+            cp \
+              android-plugin/src/main/java/com/taichix/app/plugins/ServerNativePlugin.java \
+              android/app/src/main/java/com/taichix/app/plugins/
+            echo "✅ ServerNativePlugin.java copiado exitosamente"
+          else
+            echo "❌ ERROR: ServerNativePlugin.java no encontrado"
+            exit 1
+          fi
+
+          mkdir -p android/app/src/main/assets
+          cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
+          [
+            {
+              "pkg": "@capacitor/core",
+              "classpath": "com.getcapacitor.Bridge"
+            },
+            {
+              "pkg": "com.taichix.app",
+              "classpath": "com.taichix.app.plugins.ServerNativePlugin"
+            }
+          ]
+          EOF
+
+          npx cap sync android
+
+      # 10. Compilar APK
+      - name: Build debug APK
+        working-directory: android
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      # 11. Subir el APK final como Artifact
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taichix-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
