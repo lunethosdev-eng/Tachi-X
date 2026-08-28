@@ -1,4 +1,4 @@
-name: Build Android APK (con Auto-Unzip)
+name: Build Android APK
 
 on:
   push:
@@ -7,93 +7,58 @@ on:
       - master
   workflow_dispatch:
 
-permissions:
-  contents: write
+defaults:
+  run:
+    working-directory: TaichiX-main/TaichiX-main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout del repositorio
+      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Descomprimir y aplanar la estructura de carpetas a la raíz
-      - name: Descomprimir y aplanar a la raíz
-        run: |
-          # Descomprimir cualquier archivo .zip en la raíz
-          for file in *.zip; do
-            if [ -f "$file" ]; then
-              echo "Descomprimiendo $file..."
-              unzip -o "$file" -d temp_extracted
-              rm "$file"
-            fi
-          done
-
-          # Si se extrajo algo en temp_extracted
-          if [ -d "temp_extracted" ]; then
-            # Buscar dónde quedó ubicado el package.json
-            PKG_PATH=$(find temp_extracted -name "package.json" | head -n 1)
-
-            if [ -n "$PKG_PATH" ]; then
-              # Obtener la carpeta que contiene el package.json
-              PROJECT_DIR=$(dirname "$PKG_PATH")
-              echo "Proyecto encontrado en: $PROJECT_DIR"
-
-              # Mover todo el contenido de esa carpeta a la raíz
-              cp -rn "$PROJECT_DIR"/* . 2>/dev/null || true
-              cp -rn "$PROJECT_DIR"/.* . 2>/dev/null || true
-            fi
-
-            rm -rf temp_extracted
-          fi
-
-      # 3. Commit de la estructura corregida en el repo
-      - name: Guardar cambios en el repositorio
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "auto: mover proyecto a la raiz" || exit 0
-          git push || true
-
-      # 4. Node.js
+      # 2. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 5. Instalar dependencias (Ahora package.json ya estará en la raíz)
+      # 3. Instalar dependencias
       - name: Install dependencies
         run: npm install
 
-      # 6. Build web assets
+      # 4. Build web
       - name: Build web assets
         run: npm run build
 
-      # 7. Java 21
+      # 5. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # 8. Android SDK
+      # 6. Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      # 8.5. Licencias SDK
+      
+      # 6.5. Licencias Android SDK
       - name: Accept Android SDK Licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      # 9. Capacitor Android & Plugin Setup
+      # 7. Capacitor Android
       - name: Add Capacitor Android platform
         shell: bash
         run: |
           set -e
+
           npx cap add android || true
+
+          echo "Preparing native plugin directory..."
 
           mkdir -p android/app/src/main/java/com/taichix/app/plugins
 
@@ -107,6 +72,7 @@ jobs:
             exit 1
           fi
 
+          # Crear capacitor.plugins.json
           mkdir -p android/app/src/main/assets
           cat > android/app/src/main/assets/capacitor.plugins.json << 'EOF'
           [
@@ -121,21 +87,24 @@ jobs:
           ]
           EOF
 
+          echo "✅ capacitor.plugins.json creado correctamente"
+
           npx cap sync android
 
-      # 10. Compilar APK
+      # 8. Build APK
       - name: Build debug APK
-        working-directory: android
+        working-directory: TaichiX-main/TaichiX-main/android
         shell: bash
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
-      # 11. Subir Artifact
+      # 9. Subir APK
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: taichix-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: TaichiX-main/TaichiX-main/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+
