@@ -7,6 +7,11 @@ on:
       - master
   workflow_dispatch:
 
+# Define que todas las tareas se ejecuten dentro de la carpeta donde quedó el proyecto
+defaults:
+  run:
+    working-directory: TaichiX-main/TaichiX-main
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -89,7 +94,7 @@ jobs:
 
       # 8. Build APK
       - name: Build debug APK
-        working-directory: android
+        working-directory: TaichiX-main/TaichiX-main/android
         shell: bash
         run: |
           chmod +x gradlew
@@ -100,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: taichix-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: TaichiX-main/TaichiX-main/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
 
